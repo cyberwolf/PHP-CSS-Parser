@@ -186,7 +186,7 @@ class CSSParser {
 
 			$sUtf16 = pack("H*" , $sUtf16Bytes);
 
-			$result = iconv('utf-16', $this->sCharset, $sUtf16);
+			$result = iconv('utf-16', $this->sCharset . '//IGNORE', $sUtf16);
 			// use utf-16 big endian character set for the check, as we do not want a leading Byte Order Mark
 			$check = iconv($this->sCharset, 'utf-16be', $result);
 			if ($check !== $sUtf16) {
