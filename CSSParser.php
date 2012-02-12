@@ -1,20 +1,26 @@
 <?php
+require_once('lib/CSSProperties.php');
+require_once('lib/CSSList.php');
+require_once('lib/CSSRuleSet.php');
+require_once('lib/CSSRule.php');
+require_once('lib/CSSValue.php');
+require_once('lib/CSSValueList.php');
 
 /**
 * @package html
 * CSSParser class parses CSS from text into a data structure.
 */
-class CSSParser {
+class CSSParser { 
 	private $sText;
 	private $iCurrentPosition;
 	private $iLength;
-
+	
 	public function __construct($sText, $sDefaultCharset = 'utf-8') {
 		$this->sText = $sText;
 		$this->iCurrentPosition = 0;
 		$this->setCharset($sDefaultCharset);
 	}
-
+	
 	public function setCharset($sCharset) {
 		$this->sCharset = $sCharset;
 		$this->iLength = mb_strlen($this->sText, $this->sCharset);
@@ -23,18 +29,18 @@ class CSSParser {
 	public function getCharset() {
 			return $this->sCharset;
 	}
-
+	
 	public function parse() {
 		$oResult = new CSSDocument();
 		$this->parseDocument($oResult);
 		return $oResult;
 	}
-
+	
 	private function parseDocument(CSSDocument $oDocument) {
 		$this->consumeWhiteSpace();
 		$this->parseList($oDocument, true);
 	}
-
+	
 	private function parseList(CSSList $oList, $bIsRoot = false) {
 		while(!$this->isEnd()) {
 			if($this->comes('@')) {
@@ -55,7 +61,7 @@ class CSSParser {
 			throw new Exception("Unexpected end of document");
 		}
 	}
-
+	
 	private function parseAtRule() {
 		$this->consume('@');
 		$sIdentifier = $this->parseIdentifier();
@@ -91,8 +97,8 @@ class CSSParser {
 			return $oAtRule;
 		}
 	}
-
-	private function parseIdentifier() {
+	
+	private function parseIdentifier($bAllowFunctions = true) {
 		$sResult = $this->parseCharacter(true);
 		if($sResult === null) {
 			throw new Exception("Identifier expected, got {$this->peek(5)}");
@@ -101,9 +107,14 @@ class CSSParser {
 		while(($sCharacter = $this->parseCharacter(true)) !== null) {
 			$sResult .= $sCharacter;
 		}
+		if($bAllowFunctions && $this->comes('(')) {
+			$this->consume('(');
+			$sResult = new CSSFunction($sResult, $this->parseValue(array('=', ',')));
+			$this->consume(')');
+		}
 		return $sResult;
 	}
-
+	
 	private function parseStringValue() {
 		$sBegin = $this->peek();
 		$sQuote = null;
@@ -134,13 +145,14 @@ class CSSParser {
 		}
 		return new CSSString($sResult);
 	}
-
+	
 	private function parseCharacter($bIsForIdentifier) {
 		if($this->peek() === '\\') {
 			$this->consume('\\');
 			if($this->comes('\n') || $this->comes('\r')) {
 				return '';
 			}
+			$aMatches;
 			if(preg_match('/[0-9a-fA-F]/Su', $this->peek()) === 0) {
 				return $this->consume(1);
 			}
@@ -155,47 +167,13 @@ class CSSParser {
 					}
 				}
 			}
-
-			$sUnicode = str_pad($sUnicode, 6, '0', STR_PAD_LEFT);
-
-			$v = hexdec($sUnicode);
-
-			// do not replace
-			// - line feed
-			// - single and double quotation mark
-			if (in_array($v, array(0xa, 0x22, 0x27))) {
-			  $result = '\\' . $sUnicode;
-			  return $result;
+			$iUnicode = intval($sUnicode, 16);
+			$sUtf32 = "";
+			for($i=0;$i<4;$i++) {
+				$sUtf32 .= chr($iUnicode & 0xff);
+				$iUnicode = $iUnicode >> 8;
 			}
-
-			// if the character is above U+FFFF, it must be encoded with a surrogate pair
-			// based on the "Example UTF-16 encoding procedure" on http://en.wikipedia.org/wiki/Utf-16
-			if ($v > 0xFFFF) {
-				$v_bis = $v - 0x10000;
-				$vh = $v_bis >> 10; // higher 10 bits of $v_bis
-				$vl = $v_bis & 0x3FF; // lower  10 bits of $v_bis
-				$w1 = 0xD800 + $vh; // first code unit of UTF-16 encoding
-				$w2 = 0xDC00 + $vl; // second code unit of UTF-16 encoding
-
-				$sUtf16Bytes = str_pad(dechex($w1), 4, "0", STR_PAD_LEFT) . str_pad(dechex($w2), 4, "0", STR_PAD_LEFT);
-			}
-			else {
-			  // we need the Basic Multilingual Plane
-			  $sUtf16Bytes = mb_substr($sUnicode, -4, 4, $this->sCharset);
-			}
-
-			$sUtf16 = pack("H*" , $sUtf16Bytes);
-
-			$result = iconv('utf-16', $this->sCharset . '//IGNORE', $sUtf16);
-			// use utf-16 big endian character set for the check, as we do not want a leading Byte Order Mark
-			$check = iconv($this->sCharset, 'utf-16be', $result);
-			if ($check !== $sUtf16) {
-			  // character not representable in target character set, so keep the character escape intact
-			  return '\\' . $sUnicode;
-			}
-			else {
-			  return $result;
-			}
+			return iconv('utf-32le', $this->sCharset, $sUtf32);
 		}
 		if($bIsForIdentifier) {
 			if(preg_match('/[a-zA-Z0-9]|-|_/u', $this->peek()) === 1) {
@@ -211,16 +189,16 @@ class CSSParser {
 		// Does not reach here
 		return null;
 	}
-
+	
 	private function parseSelector() {
-		$oResult = new CSSSelector();
+		$oResult = new CSSDeclarationBlock();
 		$oResult->setSelector($this->consumeUntil('{'));
 		$this->consume('{');
 		$this->consumeWhiteSpace();
 		$this->parseRuleSet($oResult);
 		return $oResult;
 	}
-
+	
 	private function parseRuleSet($oRuleSet) {
 		while(!$this->comes('}')) {
 			$oRuleSet->addRule($this->parseRule());
@@ -228,16 +206,13 @@ class CSSParser {
 		}
 		$this->consume('}');
 	}
-
+	
 	private function parseRule() {
 		$oRule = new CSSRule($this->parseIdentifier());
 		$this->consumeWhiteSpace();
 		$this->consume(':');
-		$this->consumeWhiteSpace();
-		while(!($this->comes('}') || $this->comes(';') || $this->comes('!'))) {
-			$oRule->addValue($this->parseValue());
-			$this->consumeWhiteSpace();
-		}
+		$oValue = $this->parseValue(self::listDelimiterForRule($oRule->getRule()));
+		$oRule->setValue($oValue);
 		if($this->comes('!')) {
 			$this->consume('!');
 			$this->consumeWhiteSpace();
@@ -253,28 +228,77 @@ class CSSParser {
 		return $oRule;
 	}
 
-	private function parseValue() {
-		$aResult = array();
-		do {
-			$this->consumeWhiteSpace();
-			if(is_numeric($this->peek()) || $this->comes('-') || $this->comes('.')) {
-				$aResult[] = $this->parseNumericValue();
-			} else if($this->comes('#') || $this->comes('rgb') || $this->comes('hsl')) {
-				$aResult[] = $this->parseColorValue();
-			} else if($this->comes('url')){
-				$aResult[] = $this->parseURLValue();
-			} else if($this->comes("'") || $this->comes('"')){
-				$aResult[] = $this->parseStringValue();
-			} else {
-				$aResult[] = $this->parseIdentifier();
+	private function parseValue($aListDelimiters) {
+		$aStack = array();
+		$this->consumeWhiteSpace();
+		while(!($this->comes('}') || $this->comes(';') || $this->comes('!') || $this->comes(')'))) {
+			if(count($aStack) > 0) {
+				$bFoundDelimiter = false;
+				foreach($aListDelimiters as $sDelimiter) {
+					if($this->comes($sDelimiter)) {
+						array_push($aStack, $this->consume($sDelimiter));
+						$this->consumeWhiteSpace();
+						$bFoundDelimiter = true;
+						break;
+					}
+				}
+				if(!$bFoundDelimiter) {
+					//Whitespace was the list delimiter
+					array_push($aStack, ' ');
+				}
 			}
+			array_push($aStack, $this->parsePrimitiveValue());
 			$this->consumeWhiteSpace();
-		} while($this->comes(',') && is_string($this->consume(',')));
-
-		return $aResult;
+		}
+		foreach($aListDelimiters as $sDelimiter) {
+			if(count($aStack) === 1) {
+				return $aStack[0];
+			}
+			$iStartPosition = null;
+			while(($iStartPosition = array_search($sDelimiter, $aStack, true)) !== false) {
+				$iLength = 2; //Number of elements to be joined
+				for($i=$iStartPosition+2;$i<count($aStack);$i+=2) {
+					if($sDelimiter !== $aStack[$i]) {
+						break;
+					}
+					$iLength++;
+				}
+				$oList = new CSSRuleValueList($sDelimiter);
+				for($i=$iStartPosition-1;$i-$iStartPosition+1<$iLength*2;$i+=2) {
+					$oList->addListComponent($aStack[$i]);
+				}
+				array_splice($aStack, $iStartPosition-1, $iLength*2-1, array($oList));
+			}
+		}
+		return $aStack[0];
 	}
 
-	private function parseNumericValue() {
+	private static function listDelimiterForRule($sRule) {
+		if(preg_match('/^font($|-)/', $sRule)) {
+			return array(',', '/', ' ');
+		}
+		return array(',', ' ', '/');
+	}
+	
+	private function parsePrimitiveValue() {
+		$oValue = null;
+		$this->consumeWhiteSpace();
+		if(is_numeric($this->peek()) || (($this->comes('-') || $this->comes('.')) && is_numeric($this->peek(1, 1)))) {
+			$oValue = $this->parseNumericValue();
+		} else if($this->comes('#') || $this->comes('rgb') || $this->comes('hsl')) {
+			$oValue = $this->parseColorValue();
+		} else if($this->comes('url')){
+			$oValue = $this->parseURLValue();
+		} else if($this->comes("'") || $this->comes('"')){
+			$oValue = $this->parseStringValue();
+		} else {
+			$oValue = $this->parseIdentifier();
+		}
+		$this->consumeWhiteSpace();
+		return $oValue;
+	}
+	
+	private function parseNumericValue($bForColor = false) {
 		$sSize = '';
 		if($this->comes('-')) {
 			$sSize .= $this->consume('-');
@@ -296,6 +320,10 @@ class CSSParser {
 			$sUnit = $this->consume('ex');
 		} else if($this->comes('px')) {
 			$sUnit = $this->consume('px');
+		} else if($this->comes('deg')) {
+			$sUnit = $this->consume('deg');
+		} else if($this->comes('s')) {
+			$sUnit = $this->consume('s');
 		} else if($this->comes('cm')) {
 			$sUnit = $this->consume('cm');
 		} else if($this->comes('pt')) {
@@ -309,26 +337,26 @@ class CSSParser {
 		} else if($this->comes('mm')) {
 			$sUnit = $this->consume('mm');
 		}
-		return new CSSSize($fSize, $sUnit);
+		return new CSSSize($fSize, $sUnit, $bForColor);
 	}
-
+	
 	private function parseColorValue() {
 		$aColor = array();
 		if($this->comes('#')) {
 			$this->consume('#');
-			$sValue = $this->parseIdentifier();
+			$sValue = $this->parseIdentifier(false);
 			if(mb_strlen($sValue, $this->sCharset) === 3) {
 				$sValue = $sValue[0].$sValue[0].$sValue[1].$sValue[1].$sValue[2].$sValue[2];
 			}
-			$aColor = array('r' => new CSSSize(intval($sValue[0].$sValue[1], 16)), 'g' => new CSSSize(intval($sValue[2].$sValue[3], 16)), 'b' => new CSSSize(intval($sValue[4].$sValue[5], 16)));
+			$aColor = array('r' => new CSSSize(intval($sValue[0].$sValue[1], 16), null, true), 'g' => new CSSSize(intval($sValue[2].$sValue[3], 16), null, true), 'b' => new CSSSize(intval($sValue[4].$sValue[5], 16), null, true));
 		} else {
-			$sColorMode = $this->parseIdentifier();
+			$sColorMode = $this->parseIdentifier(false);
 			$this->consumeWhiteSpace();
 			$this->consume('(');
 			$iLength = mb_strlen($sColorMode, $this->sCharset);
 			for($i=0;$i<$iLength;$i++) {
 				$this->consumeWhiteSpace();
-				$aColor[$sColorMode[$i]] = $this->parseNumericValue();
+				$aColor[$sColorMode[$i]] = $this->parseNumericValue(true);
 				$this->consumeWhiteSpace();
 				if($i < ($iLength-1)) {
 					$this->consume(',');
@@ -338,7 +366,7 @@ class CSSParser {
 		}
 		return new CSSColor($aColor);
 	}
-
+	
 	private function parseURLValue() {
 		$bUseUrl = $this->comes('url');
 		if($bUseUrl) {
@@ -354,14 +382,14 @@ class CSSParser {
 		}
 		return $oResult;
 	}
-
+	
 	private function comes($sString, $iOffset = 0) {
 		if($this->isEnd()) {
 			return false;
 		}
 		return $this->peek($sString, $iOffset) == $sString;
 	}
-
+	
 	private function peek($iLength = 1, $iOffset = 0) {
 		if($this->isEnd()) {
 			return '';
@@ -374,7 +402,7 @@ class CSSParser {
 		}
 		return mb_substr($this->sText, $this->iCurrentPosition+$iOffset, $iLength, $this->sCharset);
 	}
-
+	
 	private function consume($mValue = 1) {
 		if(is_string($mValue)) {
 			$iLength = mb_strlen($mValue, $this->sCharset);
@@ -392,15 +420,15 @@ class CSSParser {
 			return $sResult;
 		}
 	}
-
+	
 	private function consumeExpression($mExpression) {
 		$aMatches;
-		if(preg_match($mExpression, $this->inputLeft(), $aMatches) === 1) {
-			return $this->consume($aMatches[0]);
+		if(preg_match($mExpression, $this->inputLeft(), $aMatches, PREG_OFFSET_CAPTURE) === 1) {
+			return $this->consume($aMatches[0][0]);
 		}
 		throw new Exception("Expected pattern $mExpression not found, got: {$this->peek(5)}");
 	}
-
+	
 	private function consumeWhiteSpace() {
 		do {
 			while(preg_match('/\\s/isSu', $this->peek()) === 1) {
@@ -408,7 +436,7 @@ class CSSParser {
 			}
 		} while($this->consumeComment());
 	}
-
+	
 	private function consumeComment() {
 		if($this->comes('/*')) {
 			$this->consumeUntil('*/');
@@ -417,11 +445,11 @@ class CSSParser {
 		}
 		return false;
 	}
-
+	
 	private function isEnd() {
 		return $this->iCurrentPosition >= $this->iLength;
 	}
-
+	
 	private function consumeUntil($sEnd) {
 		$iEndPos = mb_strpos($this->sText, $sEnd, $this->iCurrentPosition, $this->sCharset);
 		if($iEndPos === false) {
@@ -429,427 +457,9 @@ class CSSParser {
 		}
 		return $this->consume($iEndPos-$this->iCurrentPosition);
 	}
-
+	
 	private function inputLeft() {
 		return mb_substr($this->sText, $this->iCurrentPosition, -1, $this->sCharset);
 	}
 }
 
-abstract class CSSList {
-	private $aContents;
-
-	public function __construct() {
-		$this->aContents = array();
-	}
-
-	public function append($oItem) {
-		$this->aContents[] = $oItem;
-	}
-
-	public function __toString() {
-		$sResult = '';
-		foreach($this->aContents as $oContent) {
-			$sResult .= $oContent->__toString();
-		}
-		return $sResult;
-	}
-
-	public function getContents() {
-		return $this->aContents;
-	}
-
-	protected function allSelectors(&$aResult) {
-		foreach($this->aContents as $mContent) {
-			if($mContent instanceof CSSSelector) {
-				$aResult[] = $mContent;
-			} else if($mContent instanceof CSSList) {
-				$mContent->allSelectors($aResult);
-			}
-		}
-	}
-
-	protected function allRuleSets(&$aResult) {
-		foreach($this->aContents as $mContent) {
-			if($mContent instanceof CSSRuleSet) {
-				$aResult[] = $mContent;
-			} else if($mContent instanceof CSSList) {
-				$mContent->allRuleSets($aResult);
-			}
-		}
-	}
-
-	protected function allValues($oElement, &$aResult, $sSearchString = null) {
-		if($oElement instanceof CSSList) {
-			foreach($oElement->getContents() as $oContent) {
-				$this->allValues($oContent, $aResult, $sSearchString);
-			}
-		} else if($oElement instanceof CSSRuleSet) {
-			foreach($oElement->getRules($sSearchString) as $oRule) {
-				$this->allValues($oRule, $aResult, $sSearchString);
-			}
-		} else if($oElement instanceof CSSRule) {
-			foreach($oElement->getValues() as $aValues) {
-				foreach($aValues as $mValue) {
-					$aResult[] = $mValue;
-				}
-			}
-		}
-	}
-}
-
-class CSSDocument extends CSSList {
-	public function getAllSelectors() {
-		$aResult = array();
-		$this->allSelectors($aResult);
-		return $aResult;
-	}
-
-	public function getAllRuleSets() {
-		$aResult = array();
-		$this->allRuleSets($aResult);
-		return $aResult;
-	}
-
-	public function getAllValues($mElement = null) {
-		$sSearchString = null;
-		if($mElement === null) {
-			$mElement = $this;
-		} else if(is_string($mElement)) {
-			$sSearchString = $mElement;
-			$mElement = $this;
-		}
-		$aResult = array();
-		$this->allValues($mElement, $aResult, $sSearchString);
-		return $aResult;
-	}
-}
-
-class CSSMediaQuery extends CSSList {
-	private $sQuery;
-
-	public function __construct() {
-		parent::__construct();
-		$this->sQuery = null;
-	}
-
-	public function setQuery($sQuery) {
-			$this->sQuery = $sQuery;
-	}
-
-	public function getQuery() {
-			return $this->sQuery;
-	}
-
-	public function __toString() {
-		$sResult = "@media {$this->sQuery} {";
-		$sResult .= parent::__toString();
-		$sResult .= '}';
-		return $sResult;
-	}
-}
-
-class CSSImport {
-	private $oLocation;
-	private $sMediaQuery;
-
-	public function __construct(CSSURL $oLocation, $sMediaQuery) {
-		$this->oLocation = $oLocation;
-		$this->sMediaQuery = $sMediaQuery;
-	}
-
-	public function setLocation($oLocation) {
-			$this->oLocation = $oLocation;
-	}
-
-	public function getLocation() {
-			return $this->oLocation;
-	}
-
-	public function __toString() {
-		return "@import ".$this->oLocation->__toString().($this->sMediaQuery === null ? '' : ' '.$this->sMediaQuery).';';
-	}
-}
-
-class CSSCharset {
-	private $sCharset;
-
-	public function __construct($sCharset) {
-		$this->sCharset = $sCharset;
-	}
-
-	public function setCharset($sCharset) {
-			$this->sCharset = $sCharset;
-	}
-
-	public function getCharset() {
-			return $this->sCharset;
-	}
-
-	public function __toString() {
-		return "@charset {$this->sCharset->__toString()};";
-	}
-}
-
-abstract class CSSRuleSet {
-	private $aRules;
-
-	public function __construct() {
-		$this->aRules = array();
-	}
-
-	public function addRule(CSSRule $oRule) {
-		$this->aRules[$oRule->getRule()] = $oRule;
-	}
-
-	public function getRules($mRule = null) {
-		if($mRule === null) {
-			return $this->aRules;
-		}
-		$aResult = array();
-		if($mRule instanceof CSSRule) {
-			$mRule = $mRule->getRule();
-		}
-		if(strrpos($mRule, '-')===strlen($mRule)-strlen('-')) {
-			$sStart = substr($mRule, 0, -1);
-			foreach($this->aRules as $oRule) {
-				if($oRule->getRule() === $sStart || strpos($oRule->getRule(), $mRule) === 0) {
-					$aResult[$oRule->getRule()] = $this->aRules[$oRule->getRule()];
-				}
-			}
-		} else if(isset($this->aRules[$mRule])) {
-			$aResult[$mRule] = $this->aRules[$mRule];
-		}
-		return $aResult;
-	}
-
-	public function removeRule($mRule) {
-		if($mRule instanceof CSSRule) {
-			$mRule = $mRule->getRule();
-		}
-		if(strrpos($mRule, '-')===strlen($mRule)-strlen('-')) {
-			$sStart = substr($mRule, 0, -1);
-			foreach($this->aRules as $oRule) {
-				if($oRule->getRule() === $sStart || strpos($oRule->getRule(), $mRule) === 0) {
-					unset($this->aRules[$oRule->getRule()]);
-				}
-			}
-		} else if(isset($this->aRules[$mRule])) {
-			unset($this->aRules[$mRule]);
-		}
-	}
-
-	public function __toString() {
-		$sResult = '';
-		foreach($this->aRules as $oRule) {
-			$sResult .= $oRule->__toString();
-		}
-		return $sResult;
-	}
-}
-
-class CSSAtRule extends CSSRuleSet {
-	private $sType;
-
-	public function __construct($sType) {
-		parent::__construct();
-		$this->sType = $sType;
-	}
-
-	public function __toString() {
-		$sResult = "@{$this->sType} {";
-		$sResult .= parent::__toString();
-		$sResult .= '}';
-		return $sResult;
-	}
-}
-
-class CSSSelector extends CSSRuleSet {
-	private $aSelector;
-
-	public function __construct() {
-		parent::__construct();
-		$this->aSelector = array();
-	}
-
-	public function setSelector($mSelector) {
-		if(is_array($mSelector)) {
-			$this->aSelector = $mSelector;
-		} else {
-			$this->aSelector = explode(',', $mSelector);
-		}
-		foreach($this->aSelector as $iKey => $sSelector) {
-			$this->aSelector[$iKey] = trim($sSelector);
-		}
-	}
-
-	public function getSelector() {
-		return $this->aSelector;
-	}
-
-	public function __toString() {
-		$sResult = implode(', ', $this->aSelector).' {';
-		$sResult .= parent::__toString();
-		$sResult .= '}';
-		return $sResult;
-	}
-}
-
-class CSSRule {
-	private $sRule;
-	private $aValues;
-	private $bIsImportant;
-
-	public function __construct($sRule) {
-		$this->sRule = $sRule;
-		$this->bIsImportant = false;
-	}
-
-	public function setRule($sRule) {
-			$this->sRule = $sRule;
-	}
-
-	public function getRule() {
-			return $this->sRule;
-	}
-
-	public function addValue($mValue) {
-		$this->aValues[] = $mValue;
-	}
-
-	public function setValues($aValues) {
-			$this->aValues = $aValues;
-	}
-
-	public function getValues() {
-			return $this->aValues;
-	}
-
-	public function setIsImportant($bIsImportant) {
-	    $this->bIsImportant = $bIsImportant;
-	}
-
-	public function getIsImportant() {
-	    return $this->bIsImportant;
-	}
-	public function __toString() {
-		$sResult = "{$this->sRule}: ";
-		foreach($this->aValues as $aValues) {
-			$sResult .= implode(', ', $aValues).' ';
-		}
-		if($this->bIsImportant) {
-			$sResult .= '!important';
-		} else {
-			$sResult = substr($sResult, 0, -1);
-		}
-		$sResult .= ';';
-		return $sResult;
-	}
-}
-
-abstract class CSSValue {
-	public abstract function __toString();
-}
-
-class CSSSize extends CSSValue {
-	private $fSize;
-	private $sUnit;
-
-	public function __construct($fSize, $sUnit = null) {
-		$this->fSize = floatval($fSize);
-		$this->sUnit = $sUnit;
-	}
-
-	public function setUnit($sUnit) {
-	    $this->sUnit = $sUnit;
-	}
-
-	public function getUnit() {
-	    return $this->sUnit;
-	}
-
-	public function setSize($fSize) {
-	    $this->fSize = floatval($fSize);
-	}
-
-	public function getSize() {
-	    return $this->fSize;
-	}
-
-	public function isRelative() {
-		if($this->sUnit === '%' || $this->sUnit === 'em' || $this->sUnit === 'ex') {
-			return true;
-		}
-		if($this->sUnit === null && $this->fSize != 0) {
-			return true;
-		}
-		return false;
-	}
-
-	public function __toString() {
-		return $this->fSize.($this->sUnit === null ? '' : $this->sUnit);
-	}
-}
-
-class CSSColor extends CSSValue {
-	private $aColor;
-
-	public function __construct($aColor) {
-		$this->aColor = $aColor;
-	}
-
-	public function setColor($aColor) {
-	    $this->aColor = $aColor;
-	}
-
-	public function getColor() {
-	    return $this->aColor;
-	}
-
-	public function getColorDescription() {
-		return implode('', array_keys($this->aColor));
-	}
-
-	public function __toString() {
-		return $this->getColorDescription().'('.implode(', ', $this->aColor).')';
-	}
-}
-
-class CSSString extends CSSValue {
-	private $sString;
-
-	public function __construct($sString) {
-		$this->sString = $sString;
-	}
-
-	public function setString($sString) {
-	    $this->sString = $sString;
-	}
-
-	public function getString() {
-	    return $this->sString;
-	}
-
-	public function __toString() {
-		return '"'.$this->sString.'"';
-	}
-}
-
-class CSSURL extends CSSValue {
-	private $oURL;
-
-	public function __construct(CSSString $oURL) {
-		$this->oURL = $oURL;
-	}
-
-	public function setURL(CSSString $oURL) {
-	    $this->oURL = $oURL;
-	}
-
-	public function getURL() {
-	    return $this->oURL;
-	}
-
-	public function __toString() {
-		return "url({$this->oURL->__toString()})";
-	}
-}
