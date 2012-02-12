@@ -1,8 +1,9 @@
+#!/usr/bin/env php
 <?php
 
-require_once(dirname(__FILE__).'/../CSSParser.php');
+require_once('Sabberworm/CSS/CSSParser.php');
 
-$oParser = new CSSParser(file_get_contents('php://stdin'));
+$oParser = new Sabberworm\CSS\CSSParser(file_get_contents('php://stdin'));
 
 $oDoc = $oParser->parse();
 
@@ -12,4 +13,3 @@ var_dump($oDoc);
 echo '#### Output (`__toString()`)'."\n";
 print $oDoc->__toString();
 echo "\n";
-

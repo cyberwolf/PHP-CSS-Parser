@@ -1,16 +1,12 @@
 <?php
-require_once('lib/CSSProperties.php');
-require_once('lib/CSSList.php');
-require_once('lib/CSSRuleSet.php');
-require_once('lib/CSSRule.php');
-require_once('lib/CSSValue.php');
-require_once('lib/CSSValueList.php');
+
+namespace Sabberworm\CSS;
 
 /**
 * @package html
-* CSSParser class parses CSS from text into a data structure.
+* Parser class parses CSS from text into a data structure.
 */
-class CSSParser { 
+class CSSParser {
 	private $sText;
 	private $iCurrentPosition;
 	private $iLength;
