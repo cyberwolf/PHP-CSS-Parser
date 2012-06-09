@@ -1,9 +1,11 @@
 <?php
-require_once __DIR__.'/../CSSParser.php';
+
+namespace Sabberworm\CSS;
+
 /**
  * 
  */
-class CSSDeclarationBlockTest extends PHPUnit_Framework_TestCase
+class CSSDeclarationBlockTest extends \PHPUnit_Framework_TestCase
 {
   /**
    * @dataProvider expandBorderShorthandProvider
