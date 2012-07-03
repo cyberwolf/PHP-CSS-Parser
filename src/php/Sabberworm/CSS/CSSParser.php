@@ -44,7 +44,7 @@ class CSSParser {
 			} else if($this->comes('}')) {
 				$this->consume('}');
 				if($bIsRoot) {
-					throw new Exception("Unopened {");
+					throw new \Exception("Unopened {");
 				} else {
 					return;
 				}
@@ -54,7 +54,7 @@ class CSSParser {
 			$this->consumeWhiteSpace();
 		}
 		if(!$bIsRoot) {
-			throw new Exception("Unexpected end of document");
+			throw new \Exception("Unexpected end of document");
 		}
 	}
 	
@@ -97,7 +97,7 @@ class CSSParser {
 	private function parseIdentifier($bAllowFunctions = true) {
 		$sResult = $this->parseCharacter(true);
 		if($sResult === null) {
-			throw new Exception("Identifier expected, got {$this->peek(5)}");
+			throw new \Exception("Identifier expected, got {$this->peek(5)}");
 		}
 		$sCharacter;
 		while(($sCharacter = $this->parseCharacter(true)) !== null) {
@@ -133,7 +133,7 @@ class CSSParser {
 			while(!$this->comes($sQuote)) {
 				$sContent = $this->parseCharacter(false);
 				if($sContent === null) {
-					throw new Exception("Non-well-formed quoted string {$this->peek(3)}");
+					throw new \Exception("Non-well-formed quoted string {$this->peek(3)}");
 				}
 				$sResult .= $sContent;
 			}
@@ -214,7 +214,7 @@ class CSSParser {
 			$this->consumeWhiteSpace();
 			$sImportantMarker = $this->consume(strlen('important'));
 			if(mb_convert_case($sImportantMarker, MB_CASE_LOWER) !== 'important') {
-				throw new Exception("! was followed by “".$sImportantMarker."”. Expected “important”");
+				throw new \Exception("! was followed by “".$sImportantMarker."”. Expected “important”");
 			}
 			$oRule->setIsImportant(true);
 		}
@@ -403,13 +403,13 @@ class CSSParser {
 		if(is_string($mValue)) {
 			$iLength = mb_strlen($mValue, $this->sCharset);
 			if(mb_substr($this->sText, $this->iCurrentPosition, $iLength, $this->sCharset) !== $mValue) {
-				throw new Exception("Expected $mValue, got ".$this->peek(5));
+				throw new \Exception("Expected $mValue, got ".$this->peek(5));
 			}
 			$this->iCurrentPosition += mb_strlen($mValue, $this->sCharset);
 			return $mValue;
 		} else {
 			if($this->iCurrentPosition+$mValue > $this->iLength) {
-				throw new Exception("Tried to consume $mValue chars, exceeded file end");
+				throw new \Exception("Tried to consume $mValue chars, exceeded file end");
 			}
 			$sResult = mb_substr($this->sText, $this->iCurrentPosition, $mValue, $this->sCharset);
 			$this->iCurrentPosition += $mValue;
@@ -422,7 +422,7 @@ class CSSParser {
 		if(preg_match($mExpression, $this->inputLeft(), $aMatches, PREG_OFFSET_CAPTURE) === 1) {
 			return $this->consume($aMatches[0][0]);
 		}
-		throw new Exception("Expected pattern $mExpression not found, got: {$this->peek(5)}");
+		throw new \Exception("Expected pattern $mExpression not found, got: {$this->peek(5)}");
 	}
 	
 	private function consumeWhiteSpace() {
@@ -449,7 +449,7 @@ class CSSParser {
 	private function consumeUntil($sEnd) {
 		$iEndPos = mb_strpos($this->sText, $sEnd, $this->iCurrentPosition, $this->sCharset);
 		if($iEndPos === false) {
-			throw new Exception("Required $sEnd not found, got {$this->peek(5)}");
+			throw new \Exception("Required $sEnd not found, got {$this->peek(5)}");
 		}
 		return $this->consume($iEndPos-$this->iCurrentPosition);
 	}
